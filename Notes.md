@@ -1,0 +1,43 @@
+## Address tag
+
+ - `addr:city`
+ - `addr:city:nl`
+ - `addr:country`
+ - `addr:date`
+ - `addr:district`
+ - `addr:door`
+ - `addr:flats`
+ - `addr:floor`
+ - `addr:full`
+ - `addr:hamlet`
+ - `addr:housename`
+ - `addr:housenumber`
+ - `addr:housenumber = 2 and 4`
+ - `addr:housenumber is 98-100`
+ - `addr:housenumber not in BAG`
+ - `addr:housenumber:landal`
+ - `addr:housenumber:note`
+ - `addr:housenumber:proposed`
+ - `addr:housenumber=1-2) &gt; do not merge with BAG node (addr:housenumber=2)`
+ - `addr:housenumber=68a (shop) OR addr:housenumber=68b (BAG) ?`
+ - `addr:housenumber=9-13]`
+ - `addr:inclusion`
+ - `addr:interpolation`
+ - `addr:municipality`
+ - `addr:number`
+ - `addr:place`
+ - `addr:postbox`
+ - `addr:postbox:city`
+ - `addr:postbox:postcode`
+ - `addr:postcode`
+ - `addr:province`
+ - `addr:state`
+ - `addr:street`
+ - `addr:street:official`
+ - `addr:street=Sint Joriszicht is OK, staat so in de BAG en er is een bord aan de kruispunt Sint Jorisweg en Stil Gezicht.`
+ - `addr:street_1`
+ - `addr:streetname:official`
+ - `addr:subdistrict`
+ - `addr:suburb`
+ - `addr:unit`
+ - `addr:village`
