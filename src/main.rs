@@ -1,5 +1,6 @@
 use std::default::Default;
 use std::fs::File;
+use std::io;
 use std::io::BufReader;
 
 use clap::{arg, Command};
@@ -20,7 +21,6 @@ mod entities;
 fn cli() -> Command {
     Command::new("OSM postcode data importer")
         .about("Parses OSM XML metadata file and extracts postcodes to be stored in a database")
-        .arg_required_else_help(true)
         .arg(arg!(--xml <XML>))
         .arg(arg!(--db <DATABASE_URI>).default_value("sqlite://output.db"))
 }
@@ -41,42 +41,40 @@ fn find_attr<'a>(name: &str, attributes: &'a [OwnedAttribute]) -> Option<&'a Own
         .find(|attr| attr.name.to_string() == name)
 }
 
-async fn parse_file(db_uri: &str, path: &str) -> std::io::Result<()> {
-    let file = File::open(path)?;
-    let file = BufReader::new(file); // Buffering is important for performance
+fn node_ready(node: &node::ActiveModel) -> bool {
+    node.id.is_set() &&
+        node.lat.is_set() &&
+        node.lon.is_set() &&
+        node.postcode.is_set() &&
+        node.version.is_set() &&
+        node.updated_at.is_set()
+}
 
-    let parser = EventReader::new(file);
+async fn parse_file(db_uri: &str, path: Option<&String>) -> std::io::Result<()> {
+    // let parser = match path {
+    //     Some(path) => EventReader::new(BufReader::new(File::open(path)?)),
+    //     None => {
+    //         let stdin = io::stdin();
+    //
+    //         EventReader::new(stdin.lock())
+    //     }
+    // };
+
+    let stdin = io::stdin();
+
+    let parser = EventReader::new(stdin.lock());
 
     let db = Database::connect(db_uri).await.unwrap();
 
     let mut current_node: node::ActiveModel = Default::default();
 
-    let pb1 = ProgressBar::new_spinner();
-    pb1.set_style(
-        ProgressStyle::default_spinner().template("{spinner} {pos} rows, {per_sec}/s").unwrap()
-    );
-
-    let pb2 = ProgressBar::new_spinner();
-    pb2.set_style(
-        ProgressStyle::default_spinner().template("{spinner} {pos} postcodes, {per_sec}/s").unwrap()
-    );
-
-    let m = MultiProgress::new();
-
-    m.add(pb1.clone());
-    m.add(pb2.clone());
-
     for e in parser {
-        pb1.inc(1);
-
         match e {
             Ok(XmlEvent::StartElement { name, attributes, .. }) => {
                 match name.to_string().as_str() {
                     "node" => {
-                        let result = node::Entity::insert(current_node).exec(&db).await;
-
-                        if result.is_ok() {
-                            pb2.inc(1);
+                        if node_ready(&current_node) {
+                            let _ = node::Entity::insert(current_node).exec(&db).await;
                         }
 
                         current_node = node::ActiveModel {
@@ -88,7 +86,7 @@ async fn parse_file(db_uri: &str, path: &str) -> std::io::Result<()> {
                             // updated_at: find_attr("timestamp", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             ..Default::default()
                         };
-                    },
+                    }
                     "tag" => {
                         let tag_key = attributes.iter()
                             .find(|attr| attr.name.to_string() == "k")
@@ -105,7 +103,7 @@ async fn parse_file(db_uri: &str, path: &str) -> std::io::Result<()> {
                             // "source:date" => current_node.source_date = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             _ => (),
                         }
-                    },
+                    }
                     _ => {}
                 };
             }
@@ -127,13 +125,13 @@ async fn parse_file(db_uri: &str, path: &str) -> std::io::Result<()> {
 
 fn main() {
     let matches = cli().get_matches();
-    let db_uri =  matches.get_one::<String>("db").expect("defaulted in clap");
+    let db_uri = matches.get_one::<String>("db").expect("defaulted in clap");
 
     if let Err(err) = block_on(build_db(db_uri)) {
         panic!("Error while building database: {}", err);
     }
 
-    let xml_path =  matches.get_one::<String>("xml").expect("required by clap");
+    let xml_path = matches.get_one::<String>("xml");
 
     if let Err(err) = block_on(parse_file(db_uri, xml_path)) {
         panic!("Error while parsing data: {}", err);
