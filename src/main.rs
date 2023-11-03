@@ -11,6 +11,7 @@ use sea_orm::prelude::DateTime;
 use sea_orm_migration::MigratorTrait;
 use xml::attribute::OwnedAttribute;
 use xml::reader::{EventReader, XmlEvent};
+use tokio;
 
 use crate::entities::*;
 use crate::migrator::Migrator;
@@ -74,7 +75,11 @@ async fn parse_file(db_uri: &str, path: Option<&String>) -> std::io::Result<()> 
                 match name.to_string().as_str() {
                     "node" => {
                         if node_ready(&current_node) {
-                            let _ = node::Entity::insert(current_node).exec(&db).await;
+                            let db2 = db.clone();
+
+                            tokio::spawn(async move {
+                                let _ = node::Entity::insert(current_node).exec(&db2).await;
+                            });
                         }
 
                         current_node = node::ActiveModel {
@@ -123,7 +128,8 @@ async fn parse_file(db_uri: &str, path: Option<&String>) -> std::io::Result<()> 
     Ok(())
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let matches = cli().get_matches();
     let db_uri = matches.get_one::<String>("db").expect("defaulted in clap");
 
