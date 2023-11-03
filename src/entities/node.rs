@@ -13,7 +13,7 @@ pub struct Model {
     pub lon: f64,
     pub city: Option<String>,
     pub country: Option<String>,
-    pub postcode: Option<String>,
+    pub postcode: String,
     pub street: Option<String>,
     pub house_number: Option<String>,
     pub source: Option<String>,
@@ -26,3 +26,15 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+/*
+<node id="26516190" version="9" timestamp="2021-03-09T22:45:40Z" lat="52.1955031" lon="5.9624217">
+	<tag k="addr:city" v="Apeldoorn"/>
+	<tag k="addr:country" v="NL"/>
+	<tag k="addr:housenumber" v="221"/>
+	<tag k="addr:postcode" v="7331JC"/>
+	<tag k="addr:street" v="Arnhemseweg"/>
+	<tag k="source" v="BAG"/>
+	<tag k="source:date" v="2014-02-11"/>
+</node>
+ */

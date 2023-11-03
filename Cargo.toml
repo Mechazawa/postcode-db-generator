@@ -8,5 +8,7 @@ edition = "2021"
 [dependencies]
 clap = "4.4.7"
 futures = "0.3.29"
+indicatif = "0.17.7"
 sea-orm = { version = "0.12.4", features = ["sqlx-all", "runtime-async-std-native-tls", "macros"] }
 sea-orm-migration = "0.12.4"
+xml = "0.8.10"
