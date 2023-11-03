@@ -6,7 +6,7 @@ use sea_orm::entity::prelude::*;
 #[sea_orm(table_name = "node")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
+    pub id: u64,
     #[sea_orm(column_type = "Double")]
     pub lat: f64,
     #[sea_orm(column_type = "Double")]
