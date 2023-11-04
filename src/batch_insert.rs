@@ -22,6 +22,7 @@ impl<T: ActiveModelTrait + Send + Sync + 'static> BatchInsert<T>
         let mut dispatchers = vec![];
         let mut handles = vec![];
 
+        // The threads mostly wait on the server so spawning more then the cpu count is fine
         while handles.len() < 50 {
             let (tx, mut rx) = mpsc::channel::<Vec<T>>(512);
             let my_db = db.clone();
