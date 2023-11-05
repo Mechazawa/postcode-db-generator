@@ -1,3 +1,4 @@
+use futures::executor::block_on;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, IntoActiveModel};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
@@ -14,16 +15,28 @@ pub struct BatchInsert<T>
     last_dispatcher: usize,
 }
 
+impl<T> Drop for BatchInsert<T> where
+    T: ActiveModelTrait,
+    <<T as ActiveModelTrait>::Entity as EntityTrait>::Model: IntoActiveModel<T> {
+    fn drop(&mut self) {
+        self.dispatchers.clear();
+
+        for handle in self.handles.drain(..) {
+            block_on(async {tokio::join!(handle).0.unwrap()});
+        }
+    }
+}
+
 impl<T: ActiveModelTrait + Send + Sync + 'static> BatchInsert<T>
     where
         <<T as ActiveModelTrait>::Entity as EntityTrait>::Model: IntoActiveModel<T>
 {
-    pub fn new(db: DatabaseConnection, batch_size: usize) -> BatchInsert<T> {
+    pub fn new(db: DatabaseConnection, batch_size: usize, pool_size: usize) -> BatchInsert<T> {
         let mut dispatchers = vec![];
         let mut handles = vec![];
 
         // The threads mostly wait on the server so spawning more then the cpu count is fine
-        while handles.len() < 50 {
+        while handles.len() < pool_size {
             let (tx, mut rx) = mpsc::channel::<Vec<T>>(512);
             let my_db = db.clone();
 
@@ -66,11 +79,4 @@ impl<T: ActiveModelTrait + Send + Sync + 'static> BatchInsert<T>
 
         count
     }
-
-    pub async fn join(&mut self) {
-        for handle in self.handles.drain(..) {
-            tokio::join!(handle).0.unwrap();
-        }
-    }
 }
-

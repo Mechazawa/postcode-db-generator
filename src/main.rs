@@ -1,9 +1,10 @@
 use std::default::Default;
 use std::io;
 use std::str::FromStr;
+use std::time::Duration;
 
 use clap::{arg, Command};
-use sea_orm::{ActiveValue, Database, DbErr};
+use sea_orm::{ActiveValue, ConnectOptions, Database, DbErr};
 use sea_orm::prelude::DateTime;
 use sea_orm_migration::MigratorTrait;
 use tokio;
@@ -67,11 +68,17 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
 
     let parser = EventReader::new(stdin.lock());
 
-    let db = Database::connect(db_uri).await.unwrap();
+    let mut db_opt = ConnectOptions::new(db_uri);
+
+    db_opt.max_connections(128)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(10));
+
+    let db = Database::connect(db_opt).await.unwrap();
 
     let mut current_node: node::ActiveModel = Default::default();
 
-    let mut batcher = BatchInsert::new(db.clone(), 100);
+    let mut batcher = BatchInsert::new(db.clone(), 50, 20);
 
     for e in parser {
         match e {
@@ -107,7 +114,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             "addr:city" => current_node.city = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             "addr:country" => current_node.country = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             "addr:housenumber" => current_node.house_number = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
-                            "addr:postcode" => current_node.postcode = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase())),
+                            "addr:postcode" => current_node.postcode = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
                             "addr:street" => current_node.street = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             "source" => current_node.source = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             // "source:date" => current_node.source_date = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
@@ -135,7 +142,8 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
     }
 
     batcher.flush().await;
-    batcher.join().await;
+
+    println!("Waiting for writes to finish...");
 
     Ok(())
 }
