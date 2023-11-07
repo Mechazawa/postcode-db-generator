@@ -15,6 +15,7 @@ pub struct Model {
     pub country: Option<String>,
     pub postcode: String,
     pub street: Option<String>,
+    pub province: Option<String>,
     pub house_number: Option<String>,
     pub source: Option<String>,
     pub source_date: Option<Date>,

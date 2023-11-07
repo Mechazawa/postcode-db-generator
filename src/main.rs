@@ -4,11 +4,10 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{arg, Command};
-use sea_orm::{ActiveValue, ConnectOptions, Database, DbErr};
+use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DbErr};
 use sea_orm::prelude::DateTime;
 use sea_orm_migration::MigratorTrait;
 use tokio;
-
 use xml::attribute::OwnedAttribute;
 use xml::reader::{EventReader, XmlEvent};
 
@@ -101,6 +100,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             postcode: ActiveValue::NotSet,
                             house_number: ActiveValue::Set(None),
                             street: ActiveValue::Set(None),
+                            province: ActiveValue::Set(None),
                             source: ActiveValue::Set(None),
                             source_date: ActiveValue::Set(None),
                         };
@@ -116,6 +116,8 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             "addr:housenumber" => current_node.house_number = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
                             "addr:postcode" => current_node.postcode = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
                             "addr:street" => current_node.street = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:province" => current_node.province = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "province" => current_node.province = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             "source" => current_node.source = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             // "source:date" => current_node.source_date = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             _ => (),
@@ -148,14 +150,40 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+async fn process_data(db_uri: &str) -> Result<(), DbErr> {
+    let db = Database::connect(db_uri).await?;
+
+    println!("Build uniq table");
+    db.execute_unprepared("CREATE TABLE node_uniq AS SELECT id, AVG(lat) as lat, AVG(lon) as lon, city, country, postcode, province, street, source, source_date, updated_at, version FROM node GROUP BY postcode HAVING count(distinct street) = 1").await?;
+
+    println!("Index uniq table");
+    db.execute_unprepared("CREATE INDEX idx_node_uniq_postcode ON node_uniq(postcode)").await?;
+
+    println!("Remove duplicates");
+    db.execute_unprepared("DELETE node FROM node JOIN node_uniq on node.postcode = node_uniq.postcode").await?;
+
+    println!("Re-insert normalized unique postcodes");
+    db.execute_unprepared("INSERT INTO node (id, lat, lon, city, country, postcode, province, street, house_number, source, source_date, updated_at, version) SELECT id, lat, lon, city, country, postcode, province, street, null, source, source_date, updated_at, version FROM node_uniq").await?;
+
+    println!("Cleanup, removing node_uniq");
+    db.execute_unprepared("DROP TABLE node_uniq").await?;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     let matches = cli().get_matches();
     let db_uri = matches.get_one::<String>("db").expect("defaulted in clap");
 
+    println!("Building database");
     build_db(db_uri).await.unwrap();
 
     // let xml_path = matches.get_one::<String>("xml");
 
+    println!("Parsing file");
     parse_file(db_uri).await.unwrap();
+
+    println!("Processing data");
+    process_data(db_uri).await.unwrap();
 }

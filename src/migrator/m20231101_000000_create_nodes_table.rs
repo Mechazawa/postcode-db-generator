@@ -25,6 +25,7 @@ impl MigrationTrait for Migration {
             .col(ColumnDef::new(Node::City).string())
             .col(ColumnDef::new(Node::Country).string())
             .col(ColumnDef::new(Node::Postcode).not_null().string())
+            .col(ColumnDef::new(Node::Province).string())
             .col(ColumnDef::new(Node::Street).string())
             .col(ColumnDef::new(Node::HouseNumber).string())
             .col(ColumnDef::new(Node::Source).string())
@@ -60,6 +61,7 @@ pub enum Node {
     City,
     Country,
     HouseNumber,
+    Province,
     Postcode,
     Street,
     Source,
