@@ -78,7 +78,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
 
     let mut current_node: node::ActiveModel = Default::default();
 
-    let mut batcher = BatchInsert::new(db.clone(), 50, 20);
+    let mut batcher = BatchInsert::new(db.clone(), 5000, 1);
 
     for e in parser {
         match e {

@@ -34,10 +34,10 @@ impl MigrationTrait for Migration {
             .to_owned()).await?;
 
         if manager.get_database_backend() != DbBackend::Sqlite {
-            manager.create_index(Index::create().if_not_exists().clone().name("idx-lat").table(Node::Table).col(Node::Lat).to_owned()).await?;
-            manager.create_index(Index::create().if_not_exists().clone().name("idx-lon").table(Node::Table).col(Node::Lon).to_owned()).await?;
+            // manager.create_index(Index::create().if_not_exists().clone().name("idx-lat").table(Node::Table).col(Node::Lat).to_owned()).await?;
+            // manager.create_index(Index::create().if_not_exists().clone().name("idx-lon").table(Node::Table).col(Node::Lon).to_owned()).await?;
             manager.create_index(Index::create().if_not_exists().clone().name("idx-postcode").table(Node::Table).col(Node::Postcode).to_owned()).await?;
-            manager.create_index(Index::create().if_not_exists().clone().name("idx-house_number").table(Node::Table).col(Node::HouseNumber).to_owned()).await?;
+            // manager.create_index(Index::create().if_not_exists().clone().name("idx-house_number").table(Node::Table).col(Node::HouseNumber).to_owned()).await?;
         }
 
         Ok(())
