@@ -1,14 +1,12 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::default::Default;
 use std::io;
-use std::iter::Map;
 use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{arg, Command};
 use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DbErr};
 use sea_orm::prelude::DateTime;
-use sea_orm::sea_query::Index;
 use sea_orm_migration::MigratorTrait;
 use tokio;
 use xml::attribute::OwnedAttribute;
@@ -26,15 +24,20 @@ fn cli() -> Command {
     Command::new("OSM postcode data importer")
         .about("Parses OSM XML metadata file and extracts postcodes to be stored in a database\npipe the xml into stdin to process it. You can use tools like `pv` to monitor progress.")
         // .arg(arg!(--xml <XML>))
+        .arg(arg!(--fresh))
         .arg(arg!(--db <DATABASE_URI>).default_value("sqlite://output.db"))
 }
 
-async fn build_db(db_uri: &str) -> Result<(), DbErr> {
+async fn build_db(db_uri: &str, fresh: bool) -> Result<(), DbErr> {
     let db = Database::connect(db_uri).await?;
     let schema_manager = sea_orm_migration::SchemaManager::new(&db);
 
-    Migrator::refresh(&db).await?;
-    // Migrator::up(&db, None).await?;
+    if fresh {
+        println!("Recreating database!");
+        Migrator::refresh(&db).await?;
+    } else {
+        Migrator::up(&db, None).await?;
+    }
 
     // To investigate the schema
     assert!(schema_manager.has_table("node").await?);
@@ -196,7 +199,7 @@ async fn main() {
     let db_uri = matches.get_one::<String>("db").expect("defaulted in clap");
 
     println!("Building database");
-    build_db(db_uri).await.unwrap();
+    build_db(db_uri, matches.get_flag("fresh")).await.unwrap();
 
     println!("Parsing file");
     parse_file(db_uri).await.unwrap();
