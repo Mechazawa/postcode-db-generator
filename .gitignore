@@ -1,2 +1,4 @@
 /target
 *.db
+*.osm.bz2
+*.osm.xml

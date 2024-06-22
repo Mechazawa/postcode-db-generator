@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashMap};
 use std::default::Default;
 use std::io;
 use std::str::FromStr;
@@ -28,13 +29,17 @@ fn cli() -> Command {
 
 async fn build_db(db_uri: &str) -> Result<(), DbErr> {
     let db = Database::connect(db_uri).await?;
+    let schema_manager = sea_orm_migration::SchemaManager::new(&db);
 
     Migrator::refresh(&db).await?;
-    // Migrator::up(&db).await?;
+    // Migrator::up(&db, None).await?;
 
     // To investigate the schema
-    let schema_manager = sea_orm_migration::SchemaManager::new(&db);
     assert!(schema_manager.has_table("node").await?);
+
+    if schema_manager.has_table("node_uniq").await? {
+        db.execute_unprepared("DROP TABLE `node_uniq`").await?;
+    }
 
     Ok(())
 }
@@ -42,6 +47,10 @@ async fn build_db(db_uri: &str) -> Result<(), DbErr> {
 fn find_attr<'a>(name: &str, attributes: &'a [OwnedAttribute]) -> Option<&'a OwnedAttribute> {
     attributes.iter()
         .find(|attr| attr.name.to_string() == name)
+}
+
+fn map_attr(attributes: &[OwnedAttribute]) -> BTreeMap<&str, &OwnedAttribute> {
+    BTreeMap::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)))
 }
 
 fn node_ready(node: &node::ActiveModel) -> bool {
@@ -77,7 +86,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
 
     let mut current_node: node::ActiveModel = Default::default();
 
-    let mut batcher = BatchInsert::new(db.clone(), 5000, 1);
+    let mut batcher = BatchInsert::new(db, 2000, 2);
 
     for e in parser {
         match e {
@@ -88,13 +97,15 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             batcher.insert(current_node).await;
                         }
 
+                        let attribute_map = map_attr(&attributes);
+
                         current_node = node::ActiveModel {
-                            id: find_attr("id", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
-                            lat: find_attr("lat", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
-                            lon: find_attr("lon", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
-                            version: find_attr("version", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
+                            id: attribute_map.get(&"id").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
+                            lat: attribute_map.get(&"lat").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
+                            lon: attribute_map.get(&"lon").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
+                            version: attribute_map.get(&"version").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             // updated_at: ActiveValue::Set(DateTime::default()),
-                            updated_at: find_attr("timestamp", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(DateTime::from_str(&attr.value.to_string()).unwrap_or_default())),
+                            updated_at: attribute_map.get(&"timestamp").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(DateTime::from_str(&attr.value.to_string()).unwrap_or_default())),
                             city: ActiveValue::Set(None),
                             country: ActiveValue::Set(Some("NL".to_string())),
                             postcode: ActiveValue::NotSet,
@@ -110,15 +121,17 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             .map(|attr| attr.value.as_str())
                             .expect("tags have keys");
 
+                        let value = find_attr("v", &attributes);
+
                         match tag_key {
-                            "addr:city" => current_node.city = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:country" => current_node.country = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:housenumber" => current_node.house_number = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
-                            "addr:postcode" => current_node.postcode = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
-                            "addr:street" => current_node.street = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:province" => current_node.province = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "province" => current_node.province = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "source" => current_node.source = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:city" => current_node.city = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:country" => current_node.country = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:housenumber" => current_node.house_number = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
+                            "addr:postcode" => current_node.postcode = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
+                            "addr:street" => current_node.street = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:province" => current_node.province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "province" => current_node.province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "source" => current_node.source = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             // "source:date" => current_node.source_date = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             _ => (),
                         }
@@ -160,7 +173,7 @@ async fn process_data(db_uri: &str) -> Result<(), DbErr> {
     db.execute_unprepared("CREATE INDEX idx_node_uniq_postcode ON node_uniq(postcode)").await?;
 
     println!("Remove duplicates");
-    db.execute_unprepared("DELETE node FROM node JOIN node_uniq on node.postcode = node_uniq.postcode").await?;
+    db.execute_unprepared("DELETE FROM node WHERE postcode IN (SELECT postcode FROM node_uniq)").await?;
 
     println!("Re-insert normalized unique postcodes");
     db.execute_unprepared("INSERT INTO node (id, lat, lon, city, country, postcode, province, street, house_number, source, source_date, updated_at, version) SELECT id, lat, lon, city, country, postcode, province, street, null, source, source_date, updated_at, version FROM node_uniq").await?;
@@ -178,8 +191,6 @@ async fn main() {
 
     println!("Building database");
     build_db(db_uri).await.unwrap();
-
-    // let xml_path = matches.get_one::<String>("xml");
 
     println!("Parsing file");
     parse_file(db_uri).await.unwrap();
