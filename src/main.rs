@@ -1,18 +1,19 @@
-use std::collections::BTreeMap;
+use std::cmp::max;
+use std::collections::HashMap;
 use std::default::Default;
 use std::io;
 use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{arg, Command};
-use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, ConnectOptions, Database, DbErr};
+use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DbErr, EntityTrait, Iterable};
 use sea_orm::prelude::DateTime;
+use sea_orm::sea_query::OnConflict;
 use sea_orm_migration::MigratorTrait;
 use tokio;
 use xml::attribute::OwnedAttribute;
 use xml::reader::{EventReader, XmlEvent};
 
-use crate::batch_insert::BatchInsert;
 use crate::entities::*;
 use crate::migrator::Migrator;
 
@@ -54,18 +55,16 @@ fn find_attr<'a>(name: &str, attributes: &'a [OwnedAttribute]) -> Option<&'a Own
         .find(|attr| attr.name.to_string() == name)
 }
 
-fn map_attr(attributes: &[OwnedAttribute]) -> BTreeMap<&str, &OwnedAttribute> {
-    BTreeMap::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)))
+fn node_ready(node: &node::ActiveModel) -> bool {
+    node.id.is_set() && node.postcode.is_set() && node.street.is_set()
 }
 
-fn node_ready(node: &node::ActiveModel) -> bool {
-    node.id.is_set() &&
-        node.lat.is_set() &&
-        node.lon.is_set() &&
-        node.postcode.is_set() &&
-        node.version.is_set() &&
-        node.updated_at.is_set()
+#[derive(Debug, Clone)]
+enum ParsedElementEvent {
+    Node(HashMap<String, String>),
+    Tag(String, String),
 }
+unsafe impl Send for ParsedElementEvent {}
 
 async fn parse_file(db_uri: &str) -> std::io::Result<()> {
     // let parser = match path {
@@ -91,83 +90,96 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
 
     let mut current_node: node::ActiveModel = Default::default();
 
-    let mut batcher = BatchInsert::new(db, 2000, 2);
+    const BUFFER_SIZE: usize = 500;
+    let mut buffer = Vec::with_capacity(BUFFER_SIZE);
+
     let mut current_province = None;
 
-    for e in parser {
-        match e {
-            Ok(XmlEvent::StartElement { name, attributes, .. }) => {
-                match name.to_string().as_str() {
-                    "node" => {
-                        if node_ready(&current_node) {
-                            batcher.insert(current_node).await;
-                        }
+    for raw_event in parser {
+        if let Ok(XmlEvent::StartElement { name, attributes, .. }) = raw_event {
+            if buffer.len() >= BUFFER_SIZE {
+                node::Entity::insert_many(buffer.drain(..))
+                    .on_conflict(OnConflict::column(node::Column::Id).update_columns(node::Column::iter()).to_owned())
+                    .exec(&db).await.unwrap();
 
-                        let attribute_map = BTreeMap::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)));
-
-                        current_node = node::ActiveModel {
-                            id: ActiveValue::NotSet,
-                            lat: attribute_map.get(&"lat").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
-                            lon: attribute_map.get(&"lon").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
-                            version: attribute_map.get(&"version").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
-                            // updated_at: ActiveValue::Set(DateTime::default()),
-                            updated_at: attribute_map.get(&"timestamp").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(DateTime::from_str(&attr.value.to_string()).unwrap_or_default())),
-                            city: ActiveValue::Set(None),
-                            country: ActiveValue::Set(Some("NL".to_string())),
-                            postcode: ActiveValue::NotSet,
-                            house_number: ActiveValue::Set(None),
-                            street: ActiveValue::Set(None),
-                            province: ActiveValue::Set(current_province.clone()),
-                            source: ActiveValue::Set(None),
-                            source_date: ActiveValue::Set(None),
-                        };
-                    }
-                    "tag" => {
-                        let tag_key = find_attr("k", &attributes)
-                            .map(|attr| attr.value.to_string())
-                            .expect("tags have keys");
-
-                        let value = find_attr("v", &attributes);
-
-                        match tag_key.as_str() {
-                            "addr:city"|"city" => current_node.city = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:country"|"country" => current_node.country = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:housenumber"|"housenumber" => current_node.house_number = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
-                            "addr:postcode"|"postcode" => current_node.postcode = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
-                            "addr:street"|"street" => current_node.street = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:province"|"province" => {
-                                let province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string())));
-
-                                current_node.province = province.clone();
-                                current_province = province.unwrap();
-                            },
-                            "source" => current_node.source = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            // "source:date" => current_node.source_date = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
-                            _ => (),
-                        }
-                    }
-                    _ => {}
-                };
+                buffer.reserve(max(BUFFER_SIZE - buffer.capacity(), 0));
             }
-            // Ok(XmlEvent::EndElement { name }) => {
-            //     depth -= 1;
-            //     println!("{:spaces$}-{name}", "", spaces = depth * 2);
-            // }
-            Err(e) => {
-                eprintln!("Error: {e}");
-                break;
+
+            let event = match name.to_string().as_str() {
+                "node" => ParsedElementEvent::Node(
+                    HashMap::from_iter(attributes.iter().map(|attr| (attr.name.local_name.clone(), attr.value.clone())))
+                ),
+                "tag" => {
+                    let tag_key = find_attr("k", &attributes)
+                        .map(|attr| attr.value.to_string())
+                        .expect("tags have keys");
+
+                    let value = find_attr("v", &attributes);
+
+                    if value.is_none() {
+                        continue;
+                    }
+
+                    ParsedElementEvent::Tag(tag_key, value.unwrap().to_string())
+                },
+                _ => continue,
+            };
+
+            match event {
+                ParsedElementEvent::Node(attribute_map) => {
+                    if node_ready(&current_node) {
+                        buffer.push(current_node);
+                    }
+
+                    current_node = node::ActiveModel {
+                        id: attribute_map.get("id").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.parse().unwrap())),
+                        lat: attribute_map.get("lat").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.parse().unwrap())),
+                        lon: attribute_map.get("lon").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.parse().unwrap())),
+                        version: attribute_map.get("version").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.parse().unwrap())),
+                        // updated_at: ActiveValue::Set(DateTime::default()),
+                        updated_at: attribute_map.get("timestamp").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(DateTime::from_str(&attr.to_string()).unwrap_or_default())),
+                        city: ActiveValue::Set(None),
+                        country: ActiveValue::Set(Some("NL".to_string())),
+                        postcode: ActiveValue::NotSet,
+                        house_number: ActiveValue::Set(None),
+                        street: ActiveValue::Set(None),
+                        province: ActiveValue::Set(current_province.clone()),
+                        source: ActiveValue::Set(None),
+                        source_date: ActiveValue::Set(None),
+                    };
+                }
+                ParsedElementEvent::Tag(tag_key, value) => {
+                    match tag_key.as_str() {
+                        "addr:city" | "city" => current_node.city = ActiveValue::Set(Some(value.to_string())),
+                        "addr:country" | "country" => current_node.country = ActiveValue::Set(Some(value.to_string())),
+                        "addr:housenumber" | "housenumber" => current_node.house_number = ActiveValue::Set(Some(value.to_string().to_uppercase())),
+                        "addr:postcode" | "postcode" => current_node.postcode = ActiveValue::Set(value.to_string().to_uppercase().replace(" ", "")),
+                        "addr:street" | "street" => current_node.street = ActiveValue::Set(Some(value.to_string())),
+                        "addr:province" | "province" => {
+                            let province = ActiveValue::Set(Some(value.clone()));
+
+                            current_node.province = province.clone();
+                            current_province = province.unwrap();
+                        },
+                        "source" => current_node.source = ActiveValue::Set(Some(value.clone())),
+                        // "source:date" => current_node.source_date = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
+                        _ => (),
+                    }
+                }
             }
-            // There's more: https://docs.rs/xml-rs/latest/xml/reader/enum.XmlEvent.html
-            _ => {}
         }
     }
 
     if node_ready(&current_node) {
-        batcher.insert(current_node).await;
+        buffer.push(current_node);
     }
 
     println!("Waiting for writes to finish...");
-    batcher.flush().await;
+    node::Entity::insert_many(buffer.drain(..))
+        .on_conflict(OnConflict::column(node::Column::Id).update_columns(node::Column::iter()).to_owned())
+        .exec(&db)
+        .await
+        .unwrap();
 
     Ok(())
 }

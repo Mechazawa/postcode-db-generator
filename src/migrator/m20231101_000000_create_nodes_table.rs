@@ -1,4 +1,3 @@
-use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 
 pub struct Migration;
@@ -18,8 +17,7 @@ impl MigrationTrait for Migration {
                 ColumnDef::new(Node::Id)
                     .integer()
                     .not_null()
-                    .primary_key()
-                    .auto_increment(),
+                    .primary_key(),
             )
             .col(ColumnDef::new(Node::Lat).double())
             .col(ColumnDef::new(Node::Lon).double())
