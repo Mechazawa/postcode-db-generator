@@ -21,8 +21,8 @@ impl MigrationTrait for Migration {
                     .primary_key()
                     .auto_increment(),
             )
-            .col(ColumnDef::new(Node::Lat).double().not_null())
-            .col(ColumnDef::new(Node::Lon).double().not_null())
+            .col(ColumnDef::new(Node::Lat).double())
+            .col(ColumnDef::new(Node::Lon).double())
             .col(ColumnDef::new(Node::City).string())
             .col(ColumnDef::new(Node::Country).string())
             .col(ColumnDef::new(Node::Postcode).not_null().string())
