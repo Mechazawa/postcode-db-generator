@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::default::Default;
 use std::io;
+use std::iter::Map;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -49,8 +50,8 @@ fn find_attr<'a>(name: &str, attributes: &'a [OwnedAttribute]) -> Option<&'a Own
         .find(|attr| attr.name.to_string() == name)
 }
 
-fn map_attr(attributes: &[OwnedAttribute]) -> BTreeMap<&str, &OwnedAttribute> {
-    BTreeMap::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)))
+fn map_attr(attributes: &[OwnedAttribute]) -> Map<&str, &OwnedAttribute> {
+    Map::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)))
 }
 
 fn node_ready(node: &node::ActiveModel) -> bool {
@@ -87,6 +88,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
     let mut current_node: node::ActiveModel = Default::default();
 
     let mut batcher = BatchInsert::new(db, 2000, 2);
+    let mut current_province = None;
 
     for e in parser {
         match e {
@@ -100,7 +102,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                         let attribute_map = map_attr(&attributes);
 
                         current_node = node::ActiveModel {
-                            id: attribute_map.get(&"id").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
+                            id: ActiveValue::NotSet,
                             lat: attribute_map.get(&"lat").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             lon: attribute_map.get(&"lon").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             version: attribute_map.get(&"version").map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
@@ -111,7 +113,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             postcode: ActiveValue::NotSet,
                             house_number: ActiveValue::Set(None),
                             street: ActiveValue::Set(None),
-                            province: ActiveValue::Set(None),
+                            province: ActiveValue::Set(current_province.clone()),
                             source: ActiveValue::Set(None),
                             source_date: ActiveValue::Set(None),
                         };
@@ -129,8 +131,18 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             "addr:housenumber" => current_node.house_number = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
                             "addr:postcode" => current_node.postcode = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
                             "addr:street" => current_node.street = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:province" => current_node.province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "province" => current_node.province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:province" => {
+                                let province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string())));
+
+                                current_node.province = province.clone();
+                                current_province = province.unwrap();
+                            },
+                            "province" => {
+                                let province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string())));
+
+                                current_node.province = province.clone();
+                                current_province = province.unwrap();
+                            },
                             "source" => current_node.source = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
                             // "source:date" => current_node.source_date = find_attr("v", &attributes).map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.parse().unwrap())),
                             _ => (),
@@ -156,9 +168,8 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
         batcher.insert(current_node).await;
     }
 
-    batcher.flush().await;
-
     println!("Waiting for writes to finish...");
+    batcher.flush().await;
 
     Ok(())
 }

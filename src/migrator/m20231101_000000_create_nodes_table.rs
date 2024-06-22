@@ -18,7 +18,8 @@ impl MigrationTrait for Migration {
                 ColumnDef::new(Node::Id)
                     .big_unsigned()
                     .not_null()
-                    .primary_key(),
+                    .primary_key()
+                    .auto_increment(),
             )
             .col(ColumnDef::new(Node::Lat).double().not_null())
             .col(ColumnDef::new(Node::Lon).double().not_null())
