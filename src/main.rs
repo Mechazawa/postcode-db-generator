@@ -19,7 +19,6 @@ use crate::migrator::Migrator;
 
 mod migrator;
 mod entities;
-mod batch_insert;
 
 fn cli() -> Command {
     Command::new("OSM postcode data importer")
