@@ -16,30 +16,27 @@ impl MigrationTrait for Migration {
             .table(Node::Table)
             .col(
                 ColumnDef::new(Node::Id)
-                    .big_unsigned()
+                    .integer()
                     .not_null()
-                    .primary_key(),
+                    .primary_key()
+                    .auto_increment(),
             )
-            .col(ColumnDef::new(Node::Lat).double().not_null())
-            .col(ColumnDef::new(Node::Lon).double().not_null())
+            .col(ColumnDef::new(Node::Lat).double())
+            .col(ColumnDef::new(Node::Lon).double())
             .col(ColumnDef::new(Node::City).string())
             .col(ColumnDef::new(Node::Country).string())
-            .col(ColumnDef::new(Node::Postcode).not_null().string())
+            .col(ColumnDef::new(Node::Postcode).string())
             .col(ColumnDef::new(Node::Province).string())
             .col(ColumnDef::new(Node::Street).string())
             .col(ColumnDef::new(Node::HouseNumber).string())
             .col(ColumnDef::new(Node::Source).string())
             .col(ColumnDef::new(Node::SourceDate).date())
-            .col(ColumnDef::new(Node::UpdatedAt).date_time().not_null())
-            .col(ColumnDef::new(Node::Version).integer().not_null())
+            .col(ColumnDef::new(Node::UpdatedAt).date_time())
+            .col(ColumnDef::new(Node::Version).integer())
             .to_owned()).await?;
 
-        if manager.get_database_backend() != DbBackend::Sqlite {
-            // manager.create_index(Index::create().if_not_exists().clone().name("idx-lat").table(Node::Table).col(Node::Lat).to_owned()).await?;
-            // manager.create_index(Index::create().if_not_exists().clone().name("idx-lon").table(Node::Table).col(Node::Lon).to_owned()).await?;
-            manager.create_index(Index::create().if_not_exists().clone().name("idx-postcode").table(Node::Table).col(Node::Postcode).to_owned()).await?;
-            // manager.create_index(Index::create().if_not_exists().clone().name("idx-house_number").table(Node::Table).col(Node::HouseNumber).to_owned()).await?;
-        }
+        manager.create_index(Index::create().if_not_exists().clone().name("idx-postcode").table(Node::Table).col(Node::Postcode).to_owned()).await?;
+        manager.create_index(Index::create().if_not_exists().clone().name("idx-house_number").table(Node::Table).col(Node::HouseNumber).to_owned()).await?;
 
         Ok(())
     }
