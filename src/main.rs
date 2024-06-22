@@ -8,6 +8,7 @@ use std::time::Duration;
 use clap::{arg, Command};
 use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DbErr};
 use sea_orm::prelude::DateTime;
+use sea_orm::sea_query::Index;
 use sea_orm_migration::MigratorTrait;
 use tokio;
 use xml::attribute::OwnedAttribute;
@@ -50,8 +51,8 @@ fn find_attr<'a>(name: &str, attributes: &'a [OwnedAttribute]) -> Option<&'a Own
         .find(|attr| attr.name.to_string() == name)
 }
 
-fn map_attr(attributes: &[OwnedAttribute]) -> Map<&str, &OwnedAttribute> {
-    Map::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)))
+fn map_attr(attributes: &[OwnedAttribute]) -> BTreeMap<&str, &OwnedAttribute> {
+    BTreeMap::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)))
 }
 
 fn node_ready(node: &node::ActiveModel) -> bool {
@@ -99,7 +100,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                             batcher.insert(current_node).await;
                         }
 
-                        let attribute_map = map_attr(&attributes);
+                        let attribute_map = BTreeMap::from_iter(attributes.iter().map(|attr| (attr.name.local_name.as_str(), attr)));
 
                         current_node = node::ActiveModel {
                             id: ActiveValue::NotSet,
@@ -120,24 +121,18 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                     }
                     "tag" => {
                         let tag_key = find_attr("k", &attributes)
-                            .map(|attr| attr.value.as_str())
+                            .map(|attr| attr.value.to_string())
                             .expect("tags have keys");
 
                         let value = find_attr("v", &attributes);
 
-                        match tag_key {
-                            "addr:city" => current_node.city = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:country" => current_node.country = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:housenumber" => current_node.house_number = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
-                            "addr:postcode" => current_node.postcode = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
-                            "addr:street" => current_node.street = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
-                            "addr:province" => {
-                                let province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string())));
-
-                                current_node.province = province.clone();
-                                current_province = province.unwrap();
-                            },
-                            "province" => {
+                        match tag_key.as_str() {
+                            "addr:city"|"city" => current_node.city = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:country"|"country" => current_node.country = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:housenumber"|"housenumber" => current_node.house_number = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string().to_uppercase()))),
+                            "addr:postcode"|"postcode" => current_node.postcode = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(attr.value.to_string().to_uppercase().replace(" ", ""))),
+                            "addr:street"|"street" => current_node.street = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string()))),
+                            "addr:province"|"province" => {
                                 let province = value.map_or(ActiveValue::NotSet, |attr| ActiveValue::Set(Some(attr.value.to_string())));
 
                                 current_node.province = province.clone();
