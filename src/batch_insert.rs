@@ -1,8 +1,12 @@
 use futures::executor::block_on;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, IntoActiveModel};
+use sea_orm::sea_query::OnConflict;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
+use crate::entities::node::ActiveModel as NodeModel;
+use crate::entities::node::Entity as NodeEntity;
+use crate::entities::node as Node;
 
 pub struct BatchInsert<T>
     where
@@ -37,18 +41,10 @@ impl<T: ActiveModelTrait + Send + Sync + 'static> BatchInsert<T>
 
         // The threads mostly wait on the server so spawning more then the cpu count is fine
         while handles.len() < pool_size {
-            let (tx, mut rx) = mpsc::channel::<Vec<T>>(512);
-            let my_db = db.clone();
+            let (tx, rx) = mpsc::channel::<Vec<T>>(512);
 
             dispatchers.push(tx);
-            handles.push(tokio::spawn(async move {
-                while let Some(batch) = rx.recv().await {
-                    T::Entity::insert_many(batch.into_iter())
-                        .exec(&my_db)
-                        .await
-                        .unwrap();
-                }
-            }))
+            handles.push(Self::dispatch(db.clone(), rx));
         }
 
         BatchInsert {
@@ -58,6 +54,16 @@ impl<T: ActiveModelTrait + Send + Sync + 'static> BatchInsert<T>
             dispatchers,
             last_dispatcher: 0,
         }
+    }
+    fn dispatch(db: DatabaseConnection, mut rx: Receiver<Vec<T>>) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            while let Some(batch) = rx.recv().await {
+                T::Entity::insert_many(batch.into_iter())
+                    .exec(&db)
+                    .await
+                    .unwrap();
+            }
+        })
     }
     pub async fn insert(&mut self, value: T) {
         self.batch.push(value);
@@ -78,5 +84,20 @@ impl<T: ActiveModelTrait + Send + Sync + 'static> BatchInsert<T>
         self.batch = Vec::with_capacity(self.batch_size);
 
         count
+    }
+}
+
+impl<> BatchInsert<NodeModel>
+{
+    fn dispatch(db: DatabaseConnection, mut rx: Receiver<Vec<T>>) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            while let Some(batch) = rx.recv().await {
+                NodeModel::Entity::insert_many(batch.into_iter())
+                    .on_conflict(OnConflict::column(Node::Column::Id))
+                    .exec(&db)
+                    .await
+                    .unwrap();
+            }
+        })
     }
 }

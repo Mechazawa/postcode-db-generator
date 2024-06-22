@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use clap::{arg, Command};
-use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DbErr};
+use sea_orm::{ActiveModelTrait, ActiveValue, ConnectionTrait, ConnectOptions, Database, DbErr};
 use sea_orm::prelude::DateTime;
 use sea_orm_migration::MigratorTrait;
 use tokio;
@@ -31,7 +31,7 @@ async fn build_db(db_uri: &str) -> Result<(), DbErr> {
     let db = Database::connect(db_uri).await?;
     let schema_manager = sea_orm_migration::SchemaManager::new(&db);
 
-    Migrator::refresh(&db).await?;
+    // Migrator::refresh(&db).await?;
     // Migrator::up(&db, None).await?;
 
     // To investigate the schema
@@ -83,10 +83,9 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
         .connect_timeout(Duration::from_secs(10));
 
     let db = Database::connect(db_opt).await.unwrap();
+    tokio::s
 
     let mut current_node: node::ActiveModel = Default::default();
-
-    let mut batcher = BatchInsert::new(db, 2000, 2);
 
     for e in parser {
         match e {
@@ -94,7 +93,7 @@ async fn parse_file(db_uri: &str) -> std::io::Result<()> {
                 match name.to_string().as_str() {
                     "node" => {
                         if node_ready(&current_node) {
-                            batcher.insert(current_node).await;
+
                         }
 
                         let attribute_map = map_attr(&attributes);
