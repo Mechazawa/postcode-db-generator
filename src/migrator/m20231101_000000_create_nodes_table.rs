@@ -19,22 +19,31 @@ impl MigrationTrait for Migration {
                     .not_null()
                     .primary_key(),
             )
-            .col(ColumnDef::new(Node::Lat).double())
-            .col(ColumnDef::new(Node::Lon).double())
+            .col(ColumnDef::new(Node::Lat).double().not_null())
+            .col(ColumnDef::new(Node::Lon).double().not_null())
             .col(ColumnDef::new(Node::City).string())
             .col(ColumnDef::new(Node::Country).string())
-            .col(ColumnDef::new(Node::Postcode).string())
+            .col(ColumnDef::new(Node::Postcode).string().not_null())
+            .col(ColumnDef::new(Node::Street).string().not_null())
             .col(ColumnDef::new(Node::Province).string())
-            .col(ColumnDef::new(Node::Street).string())
+            .col(ColumnDef::new(Node::State).string())
             .col(ColumnDef::new(Node::HouseNumber).string())
+            .col(ColumnDef::new(Node::HouseName).string())
             .col(ColumnDef::new(Node::Source).string())
             .col(ColumnDef::new(Node::SourceDate).date())
+            .col(ColumnDef::new(Node::CreatedAt).date_time())
             .col(ColumnDef::new(Node::UpdatedAt).date_time())
-            .col(ColumnDef::new(Node::Version).integer())
             .to_owned()).await?;
 
-        manager.create_index(Index::create().if_not_exists().clone().name("idx-postcode").table(Node::Table).col(Node::Postcode).to_owned()).await?;
-        manager.create_index(Index::create().if_not_exists().clone().name("idx-house_number").table(Node::Table).col(Node::HouseNumber).to_owned()).await?;
+        manager.create_index(
+            Index::create()
+                .if_not_exists().clone()
+                .name("idx-postcode-house_number")
+                .table(Node::Table)
+                .col(Node::Postcode)
+                .col(Node::HouseNumber)
+                .to_owned()
+        ).await?;
 
         Ok(())
     }
@@ -55,12 +64,14 @@ pub enum Node {
     Lon,
     City,
     Country,
-    HouseNumber,
-    Province,
     Postcode,
     Street,
+    Province,
+    State,
+    HouseNumber,
+    HouseName,
     Source,
     SourceDate,
+    CreatedAt,
     UpdatedAt,
-    Version,
 }
