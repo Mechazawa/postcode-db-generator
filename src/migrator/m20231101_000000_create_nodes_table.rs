@@ -15,7 +15,7 @@ impl MigrationTrait for Migration {
             .table(Node::Table)
             .col(
                 ColumnDef::new(Node::Id)
-                    .integer()
+                    .big_integer()
                     .not_null()
                     .primary_key(),
             )
