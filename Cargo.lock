@@ -484,8 +484,10 @@ checksum = "7f2c685bad3eb3d45a01354cedb7d5faa66194d1d58ba6e267a8de788f79db38"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-targets 0.48.5",
 ]
 
@@ -1589,9 +1591,11 @@ checksum = "3bccab0e7fd7cc19f820a1c8c91720af652d0c88dc9664dd72aef2614f04af3b"
 name = "postcode-db-generator"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
  "futures",
  "indicatif",
+ "regex",
  "sea-orm",
  "sea-orm-migration",
  "tokio",
