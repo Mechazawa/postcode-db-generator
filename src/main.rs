@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use clap::{arg, Command};
 use osmpbf::{DenseNode, Element, ElementReader};
-use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DatabaseConnection, DbErr, debug_print, EntityTrait, Iterable};
+use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DatabaseConnection, DbErr, EntityTrait, Iterable};
 use sea_orm_migration::MigratorTrait;
 use sea_orm_migration::prelude::OnConflict;
 
@@ -86,7 +86,7 @@ impl From<DenseNode<'_>> for node::ActiveModel {
 async fn parse_file(db: Arc<DatabaseConnection>) -> std::io::Result<()> {
     let reader = ElementReader::from_path("/dev/stdin")?;
     let mut models = vec![];
-    let mut futures = Vec::with_capacity(20_000);
+    let mut futures = Vec::with_capacity(4000);
 
     reader.for_each(
         |element| {
@@ -100,34 +100,46 @@ async fn parse_file(db: Arc<DatabaseConnection>) -> std::io::Result<()> {
                 }
             }
 
-            if models.len() > 4000 {
+            if models.len() > 1000 {
                 let my_db = db.clone();
+                let batch: Vec<_> = models.drain(..).collect();
 
-                let future = tokio::spawn({
-                    node::Entity::insert_many(models.drain(..))
+                let future = tokio::spawn(async move {
+                    node::Entity::insert_many(batch)
                         .on_conflict(
                             OnConflict::column(node::Column::Id)
                                 .update_columns(node::Column::iter())
                                 .to_owned()
-                        ).exec::<DatabaseConnection>(my_db.as_ref())
+                        ).exec::<DatabaseConnection>(my_db.as_ref()).await
                 });
 
-                models = Vec::with_capacity(20_000);
                 futures.push(future);
+
+                if futures.len() > 10_000 {
+                    futures = futures
+                        .drain(..)
+                        .filter(|f| !f.is_finished())
+                        .collect();
+                }
             }
         }
     )?;
 
-    node::Entity::insert_many(models.drain(..))
-        .on_conflict(
-            OnConflict::column(node::Column::Id)
-                .update_columns(node::Column::iter())
-                .to_owned()
-        ).exec::<DatabaseConnection>(db.as_ref()).await.unwrap();
+    let my_db = db.clone();
+    let future = tokio::spawn(async move {
+        node::Entity::insert_many(models.drain(..))
+            .on_conflict(
+                OnConflict::column(node::Column::Id)
+                    .update_columns(node::Column::iter())
+                    .to_owned()
+            ).exec::<DatabaseConnection>(my_db.as_ref()).await
+    });
+
+    futures.push(future);
 
     println!("Waiting for write to finish...");
     for future in futures.drain(..) {
-        future.await.unwrap();
+        future.await.unwrap().unwrap();
     }
 
     Ok(())
