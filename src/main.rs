@@ -91,7 +91,7 @@ async fn parse_file(db: Arc<DatabaseConnection>) -> std::io::Result<()> {
 
     let mut current_node: node::ActiveModel = Default::default();
 
-    const BUFFER_SIZE: usize = 256;
+    const BUFFER_SIZE: usize = 1024;
     let mut buffer = Vec::with_capacity(BUFFER_SIZE);
     let mut futures = Vec::new();
 
