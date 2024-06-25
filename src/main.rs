@@ -1,18 +1,20 @@
 use std::default::Default;
 use std::sync::Arc;
-use std::time::Duration;
 
 use clap::{arg, Command};
 use osmpbf::{DenseNode, Element, ElementReader};
-use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DatabaseConnection, DbErr, EntityTrait, Iterable};
+use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DatabaseConnection, DbErr, Iterable};
 use sea_orm_migration::MigratorTrait;
-use sea_orm_migration::prelude::OnConflict;
+use tokio::time::Duration;
 
+use crate::batch_insert::BatchInsert;
 use crate::entities::*;
 use crate::migrator::Migrator;
 
 mod migrator;
 mod entities;
+
+mod batch_insert;
 
 fn cli() -> Command {
     Command::new("OSM postcode data importer")
@@ -85,8 +87,7 @@ impl From<DenseNode<'_>> for node::ActiveModel {
 
 async fn parse_file(db: Arc<DatabaseConnection>) -> std::io::Result<()> {
     let reader = ElementReader::from_path("/dev/stdin")?;
-    let mut models = vec![];
-    let mut futures = Vec::with_capacity(4000);
+    let mut batcher = BatchInsert::new(db.clone(), 2000, 4);
 
     reader.for_each(
         |element| {
@@ -96,51 +97,14 @@ async fn parse_file(db: Arc<DatabaseConnection>) -> std::io::Result<()> {
                 _ => None,
             } {
                 if node_ready(&model) {
-                    models.push(model);
-                }
-            }
-
-            if models.len() > 1000 {
-                let my_db = db.clone();
-                let batch: Vec<_> = models.drain(..).collect();
-
-                let future = tokio::spawn(async move {
-                    node::Entity::insert_many(batch)
-                        .on_conflict(
-                            OnConflict::column(node::Column::Id)
-                                .update_columns(node::Column::iter())
-                                .to_owned()
-                        ).exec::<DatabaseConnection>(my_db.as_ref()).await
-                });
-
-                futures.push(future);
-
-                if futures.len() > 10_000 {
-                    futures = futures
-                        .drain(..)
-                        .filter(|f| !f.is_finished())
-                        .collect();
+                    batcher.insert(model);
                 }
             }
         }
     )?;
 
-    let my_db = db.clone();
-    let future = tokio::spawn(async move {
-        node::Entity::insert_many(models.drain(..))
-            .on_conflict(
-                OnConflict::column(node::Column::Id)
-                    .update_columns(node::Column::iter())
-                    .to_owned()
-            ).exec::<DatabaseConnection>(my_db.as_ref()).await
-    });
-
-    futures.push(future);
-
-    println!("Waiting for write to finish...");
-    for future in futures.drain(..) {
-        future.await.unwrap().unwrap();
-    }
+    println!("Waiting for writes to finish...");
+    batcher.flush();
 
     Ok(())
 }
