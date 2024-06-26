@@ -11,7 +11,7 @@ pub struct BatchInsert {
     batch: Vec<NodeModel>,
     pub batch_size: usize,
     handles: Vec<JoinHandle<()>>,
-    dispatchers: Vec<mpsc::Sender<Vec<NodeModel>>>,
+    dispatchers: Vec<mpsc::SyncSender<Vec<NodeModel>>>,
     last_dispatcher: usize,
 }
 
@@ -32,9 +32,8 @@ impl BatchInsert
         let mut dispatchers = vec![];
         let mut handles = vec![];
 
-        // The threads mostly wait on the server so spawning more then the cpu count is fine
         while handles.len() < pool_size {
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = mpsc::sync_channel(512);
 
             dispatchers.push(tx);
             handles.push(Self::dispatch(db.clone(), rx));
