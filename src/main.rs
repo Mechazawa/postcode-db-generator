@@ -63,8 +63,6 @@ impl From<DenseNode<'_>> for node::ActiveModel {
             house_name: ActiveValue::Set(None),
             source: ActiveValue::Set(None),
             source_date: ActiveValue::Set(None),
-            updated_at: ActiveValue::Set(None),
-            created_at: ActiveValue::Set(None),
             ..node::ActiveModel::default()
         };
 
@@ -116,7 +114,7 @@ async fn parse_file(db: Arc<DatabaseConnection>, default_country: Option<String>
 
 async fn process_data(db: Arc<DatabaseConnection>) -> Result<(), DbErr> {
     println!("Build uniq table");
-    db.execute_unprepared("CREATE TABLE node_uniq AS SELECT id, AVG(lat) as lat, AVG(lon) as lon, city, country, postcode, province, street, source, source_date, updated_at, version FROM node GROUP BY postcode HAVING count(distinct street) = 1").await?;
+    db.execute_unprepared("CREATE TABLE node_uniq AS SELECT id, AVG(lat) as lat, AVG(lon) as lon, city, country, postcode, province, street, source, source_date, version FROM node GROUP BY postcode HAVING count(distinct street) = 1").await?;
 
     println!("Index uniq table");
     db.execute_unprepared("CREATE INDEX idx_node_uniq_postcode ON node_uniq(postcode)").await?;
@@ -125,7 +123,7 @@ async fn process_data(db: Arc<DatabaseConnection>) -> Result<(), DbErr> {
     db.execute_unprepared("DELETE FROM node WHERE postcode IN (SELECT postcode FROM node_uniq)").await?;
 
     println!("Re-insert normalized unique postcodes");
-    db.execute_unprepared("INSERT INTO node (id, lat, lon, city, country, postcode, province, street, house_number, source, source_date, updated_at, version) SELECT id, lat, lon, city, country, postcode, province, street, null, source, source_date, updated_at, version FROM node_uniq").await?;
+    db.execute_unprepared("INSERT INTO node (id, lat, lon, city, country, postcode, province, street, house_number, source, source_date) SELECT id, lat, lon, city, country, postcode, province, street, null, source, source_date FROM node_uniq").await?;
 
     println!("Cleanup, removing node_uniq");
     db.execute_unprepared("DROP TABLE node_uniq").await?;
