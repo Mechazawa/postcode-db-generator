@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::{arg, Command};
 use osmpbf::{DenseNode, Element, ElementReader};
-use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DatabaseConnection, DbErr, Iterable};
+use sea_orm::{ActiveValue, ConnectionTrait, ConnectOptions, Database, DatabaseConnection, DbErr};
 use sea_orm_migration::MigratorTrait;
 use tokio::time::Duration;
 
@@ -21,6 +21,7 @@ fn cli() -> Command {
         .about("Parses OSM XML metadata file and extracts postcodes to be stored in a database\npipe the xml into stdin to process it. You can use tools like `pv` to monitor progress.")
         // .arg(arg!(--xml <XML>))
         .arg(arg!(--fresh))
+        .arg(arg!(--country <COUNTRY>)).about("Default country")
         .arg(arg!(--db <DATABASE_URI>).default_value("sqlite://output.db"))
 }
 
@@ -54,16 +55,16 @@ impl From<DenseNode<'_>> for node::ActiveModel {
             id: ActiveValue::set(value.id()),
             lat: ActiveValue::set(value.lat()),
             lon: ActiveValue::set(value.lon()),
-            // city: ActiveValue::Set(None),
-            // country: ActiveValue::Set(None),
-            // province: ActiveValue::Set(None),
-            // state: ActiveValue::Set(None),
-            // house_number: ActiveValue::Set(None),
-            // house_name: ActiveValue::Set(None),
-            // source: ActiveValue::Set(None),
-            // source_date: ActiveValue::Set(None),
-            // updated_at: ActiveValue::Set(None),
-            // created_at: ActiveValue::Set(None),
+            city: ActiveValue::Set(None),
+            country: ActiveValue::NotSet,
+            province: ActiveValue::Set(None),
+            state: ActiveValue::Set(None),
+            house_number: ActiveValue::Set(None),
+            house_name: ActiveValue::Set(None),
+            source: ActiveValue::Set(None),
+            source_date: ActiveValue::Set(None),
+            updated_at: ActiveValue::Set(None),
+            created_at: ActiveValue::Set(None),
             ..node::ActiveModel::default()
         };
 
@@ -85,18 +86,22 @@ impl From<DenseNode<'_>> for node::ActiveModel {
     }
 }
 
-async fn parse_file(db: Arc<DatabaseConnection>) -> std::io::Result<()> {
+async fn parse_file(db: Arc<DatabaseConnection>, default_country: Option<String>) -> std::io::Result<()> {
     let reader = ElementReader::from_path("/dev/stdin")?;
     let mut batcher = BatchInsert::new(db.clone(), 2000, 4);
 
     reader.for_each(
         |element| {
-            if let Some(model) = match element {
+            if let Some(mut model) = match element {
                 Element::DenseNode(data) => Some(node::ActiveModel::from(data)),
                 // Element::Node(data) => Some(node::ActiveModel::from(data)),
                 _ => None,
             } {
                 if node_ready(&model) {
+                    if model.country.is_not_set() {
+                        model.country = ActiveValue::set(default_country.clone());
+                    }
+
                     batcher.insert(model);
                 }
             }
@@ -145,7 +150,7 @@ async fn main() {
     build_db(db.clone(), matches.get_flag("fresh")).await.unwrap();
 
     println!("Parsing file");
-    parse_file(db.clone()).await.unwrap();
+    parse_file(db.clone(), matches.get_one::<String>("country").cloned()).await.unwrap();
 
     println!("Processing data");
     process_data(db.clone()).await.unwrap();

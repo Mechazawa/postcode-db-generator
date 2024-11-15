@@ -20,9 +20,9 @@ pub struct Model {
     pub house_name: Option<String>,
     pub source: Option<String>,
     pub source_date: Option<Date>,
-    // #[sea_orm(created_at)]
+    #[sea_orm(created_at)]
     pub created_at: Option<DateTime>,
-    // #[sea_orm(updated_at)]
+    #[sea_orm(updated_at)]
     pub updated_at: Option<DateTime>,
 }
 
