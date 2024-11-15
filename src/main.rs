@@ -46,7 +46,7 @@ async fn build_db(db: Arc<DatabaseConnection>, fresh: bool) -> Result<(), DbErr>
 }
 
 fn node_ready(node: &node::ActiveModel) -> bool {
-    node.id.is_set() && node.postcode.is_set() && node.street.is_set()
+    node.id.is_set() && node.postcode.is_set() && node.street.is_set() && !node.postcode.clone().unwrap().trim().is_empty()
 }
 
 impl From<DenseNode<'_>> for node::ActiveModel {
@@ -114,7 +114,7 @@ async fn parse_file(db: Arc<DatabaseConnection>, default_country: Option<String>
 
 async fn process_data(db: Arc<DatabaseConnection>) -> Result<(), DbErr> {
     println!("Build uniq table");
-    db.execute_unprepared("CREATE TABLE node_uniq AS SELECT id, AVG(lat) as lat, AVG(lon) as lon, city, country, postcode, province, street, source, source_date, version FROM node GROUP BY postcode HAVING count(distinct street) = 1").await?;
+    db.execute_unprepared("CREATE TABLE node_uniq AS SELECT id, AVG(lat) as lat, AVG(lon) as lon, city, country, postcode, province, street, source, source_date FROM node GROUP BY postcode HAVING count(distinct street) = 1").await?;
 
     println!("Index uniq table");
     db.execute_unprepared("CREATE INDEX idx_node_uniq_postcode ON node_uniq(postcode)").await?;
