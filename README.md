@@ -44,5 +44,5 @@ LIMIT 1;
 ```
 
 ## Limitations
-Due to how the file is parsed there are currently some errors when setting the province for a postal code.
+Due to how the file is structured there are currently some errors when setting the province for a postal code.
 This will be resolved in a future revision
