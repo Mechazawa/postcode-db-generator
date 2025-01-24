@@ -42,3 +42,7 @@ LIMIT 1;
 | 51.5608428009063 | 5.07643564622356 | Tilburg | NL      | 5038LX   | Noord-Brabant | Talent Square |
 +------------------+------------------+---------+---------+----------+---------------+---------------+
 ```
+
+## Limitations
+Due to how the file is parsed there are currently some errors when setting the province for a postal code.
+This will be resolved in a future revision
